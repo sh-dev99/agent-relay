@@ -28,18 +28,25 @@ class TestRelayAppGuard(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 3)
         self.assertIn("Example.app", stderr.getvalue())
 
-    def test_process_running_delegates_to_pgrep(self):
+    def test_process_running_uses_ps_output(self):
+        binary = Path("/Applications/Example.app/Contents/MacOS/Example")
+        out = f"  12 /sbin/launchd\n  99 {binary} --foo\n"
+        with patch.object(
+            module.subprocess,
+            "run",
+            return_value=type("R", (), {"returncode": 0, "stdout": out})(),
+        ) as run:
+            self.assertTrue(module.app_process_running(binary))
+        self.assertEqual(run.call_count, 1)
+
+    def test_process_running_false_when_path_absent(self):
         binary = Path("/Applications/Example.app/Contents/MacOS/Example")
         with patch.object(
             module.subprocess,
             "run",
-            side_effect=[
-                type("R", (), {"returncode": 0, "stdout": "99\n"})(),
-                type("R", (), {"returncode": 0, "stdout": f"{binary} --foo"})(),
-            ],
-        ) as run:
-            self.assertTrue(module.app_process_running(binary))
-        self.assertEqual(run.call_count, 2)
+            return_value=type("R", (), {"returncode": 0, "stdout": "  12 /sbin/launchd\n"})(),
+        ):
+            self.assertFalse(module.app_process_running(binary))
 
 if __name__ == "__main__":
     unittest.main()

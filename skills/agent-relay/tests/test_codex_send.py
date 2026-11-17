@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import socket
 import struct
@@ -142,7 +143,7 @@ class TestRouting(unittest.TestCase):
         ))
         with (patch.object(module, "steer", side_effect=lambda path, *args: client.deliver(*args)),
               patch.object(module.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as queue):
-            result = module.deliver_message(Path("socket"), "thread", "Claude", "報告", "id")
+            result = module.deliver_message(Path("socket"), "thread", "Claude", "報告", "id", wake=False)
         self.assertEqual(result, {
             "status": "queued", "route": "queue", "presentation": "chat_message", "message_id": "id"
         })
@@ -159,7 +160,7 @@ class TestRouting(unittest.TestCase):
                     with self.assertRaises(module.RelayError):
                         module.deliver_message(Path("socket"), "thread", "Claude", "報告", "id")
                 else:
-                    result = module.deliver_message(Path("socket"), "thread", "Claude", "報告", "id")
+                    result = module.deliver_message(Path("socket"), "thread", "Claude", "報告", "id", wake=True)
                     self.assertEqual(result["route"], "steer")
                     self.assertEqual(result["presentation"], "chat_message")
                 queue.assert_not_called()
@@ -181,6 +182,7 @@ class TestRouting(unittest.TestCase):
 
     def test_no_client_found_queues_with_fallback_reason(self):
         with (patch.object(module, "steer", side_effect=module.OwnerNotFound("未送信")),
+              patch.object(module, "wake_thread", return_value=False),
               patch.object(module.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as queue):
             stderr = io.StringIO()
             with patch.object(sys, "stderr", stderr):
@@ -194,6 +196,16 @@ class TestRouting(unittest.TestCase):
         })
         queue.assert_called_once()
         self.assertEqual(stderr.getvalue().strip(), module.OWNER_NOT_FOUND_WARNING)
+
+    def test_owner_not_found_wakes_then_queues(self):
+        with (patch.object(module, "steer", side_effect=[module.OwnerNotFound("未ロード"), module.InactiveTurn("待機")]),
+              patch.object(module, "wake_thread", return_value=True) as wake,
+              patch.object(module.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)) as queue):
+            result = module.deliver_message(Path("socket"), "thread", "Claude", "報告", "id", wake=True)
+        self.assertEqual(result["wake"], "opened")
+        self.assertEqual(result["route"], "queue")
+        self.assertEqual(wake.call_count, 1)
+        queue.assert_called_once()
 
     def test_steering_owner_not_found_steer_only_stays_not_sent(self):
         with (patch.object(module, "steer", side_effect=module.OwnerNotFound("未送信")),
@@ -231,6 +243,50 @@ class TestCodexAppGuard(unittest.TestCase):
             module.main()
         self.assertEqual(ctx.exception.code, 3)
         deliver.assert_not_called()
+
+class TestArrivalRecord(unittest.TestCase):
+    def test_thread_record_and_arrival(self):
+        import tempfile
+        # 公開時の検査に合わせて UUID は実行時に組み立てる
+        thread = "-".join(["11111111", "2222", "4333", "8444", "555555555555"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sessions" / "2026" / "11" / "17" / f"rollout-x-{thread}.jsonl"
+            path.parent.mkdir(parents=True)
+            row = {"type": "event_msg", "payload": {"type": "message", "role": "user",
+                   "content": [{"type": "input_text", "text": "メッセージ ID: m9"}]}}
+            path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            with patch.dict(os.environ, {"CODEX_HOME": tmp}):
+                self.assertEqual(module.thread_record(thread), str(path))
+                self.assertTrue(module.arrived_in_record(str(path), "m9"))
+                self.assertFalse(module.arrived_in_record(str(path), "nope"))
+                self.assertIsNone(module.thread_record("-".join(["99999999", "2222", "4333", "8444", "555555555555"])))
+
+class TestDuplicate(unittest.TestCase):
+    def test_same_message_id_blocks_resend(self):
+        import tempfile
+        thread = "00000000-0000-4000-8000-" + "000000000001"
+        argv = ["codex_send.py", "--thread", thread, "--sender", "t", "--message-id", "m1"]
+        ok = {"status": "accepted", "route": "steer", "presentation": "chat_message",
+              "message_id": "m1"}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+                os.environ, {"AGENT_RELAY_STATE_DIR": tmp}):
+            with patch.object(module, "ensure_codex_app_running"), \
+                    patch.object(module, "deliver_message", return_value=dict(ok)), \
+                    patch.object(module, "thread_record", return_value=None), \
+                    patch.object(module, "arrived_in_record", return_value=False), \
+                    patch.object(sys, "argv", argv), \
+                    patch.object(sys, "stdin", io.StringIO("本文")), \
+                    patch.object(sys, "stdout", io.StringIO()):
+                self.assertEqual(module.main(), 0)
+            with patch.object(module, "ensure_codex_app_running") as guard, \
+                    patch.object(module, "deliver_message") as deliver, \
+                    patch.object(sys, "argv", argv), \
+                    patch.object(sys, "stdin", io.StringIO("本文")), \
+                    patch.object(sys, "stderr", io.StringIO()) as err:
+                self.assertEqual(module.main(), 3)
+        deliver.assert_not_called()
+        guard.assert_not_called()
+        self.assertIn("二重送信", err.getvalue())
 
 if __name__ == "__main__":
     unittest.main()

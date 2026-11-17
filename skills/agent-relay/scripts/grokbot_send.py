@@ -4,7 +4,7 @@
 使い方:
   python3 grokbot_send.py send "依頼本文" [--from 自分のアプリ名] [--force]
 
-依頼本文は ~/.agents/agent-inbox/grokbot.md に書き出し、Webhook は呼び鈴として叩く。
+依頼本文は ~/Library/Application Support/agent-relay/inbox/grokbot.md に書き出し、Webhook は呼び鈴として叩く。
 URL と key はキーチェーン（サービス名 grokbot-webhook-url / grokbot-webhook-key、アカウント agent-relay）から読む。
 画面やログには出さない。
 """
@@ -24,7 +24,7 @@ if str(_SCRIPTS) not in sys.path:
 
 from relay_app_guard import app_closed_message, app_process_running, ensure_app_running
 
-INBOX = Path.home() / ".agents" / "agent-inbox" / "grokbot.md"
+INBOX = Path.home() / "Library" / "Application Support" / "agent-relay" / "inbox" / "grokbot.md"
 GROK_BOT_BINARY = Path("/Applications/Grok Bot.app/Contents/MacOS/Grok Bot")
 GROK_BOT_APP_NAME = "Grok Bot.app"
 LOCAL_EXEC_LOG = Path.home() / ".grokbot" / "local-exec-daemon.log"
