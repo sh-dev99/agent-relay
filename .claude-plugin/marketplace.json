@@ -1,0 +1,14 @@
+{
+  "name": "sh-dev99-agent-relay",
+  "description": "別AIエージェント連携スキル agent-relay の公開カタログ",
+  "owner": {
+    "name": "sh-dev99"
+  },
+  "plugins": [
+    {
+      "name": "agent-relay",
+      "source": "./",
+      "description": "起動中の別AIエージェントへ、GUI操作を挟まず文を届けるスキル（agent-relay）を配布するプラグイン"
+    }
+  ]
+}

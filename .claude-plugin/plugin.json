@@ -1,0 +1,9 @@
+{
+  "name": "agent-relay",
+  "description": "起動中の別AIエージェントへ、GUI操作を挟まず文を届けるスキル（agent-relay）を配布するプラグイン",
+  "version": "0.1.0",
+  "author": {
+    "name": "sh-dev99"
+  },
+  "license": "MIT"
+}
